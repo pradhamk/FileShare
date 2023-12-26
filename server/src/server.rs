@@ -2,11 +2,11 @@ use crate::log::log;
 use chrono::Utc;
 use futures::{StreamExt, TryStreamExt};
 use nanoid::nanoid;
-use std::{env, fs, path::Path};
+use std::{env, ffi::OsStr, fs, path::Path};
 use warp::{
     filters::{header::header, multipart::FormData},
     http::StatusCode,
-    reject::{self, MissingHeader, Rejection},
+    reject::{self, MethodNotAllowed, MissingHeader, Rejection},
     reply, Buf, Filter, Reply,
 };
 
@@ -22,9 +22,7 @@ impl reject::Reject for SystemError {}
 impl reject::Reject for Unauthorized {}
 
 pub async fn start() {
-    let root_path = warp::path::end().map(|| {
-        "File Hosting Server"
-    });
+    let root_path = warp::path::end().map(|| "File Hosting Server");
 
     let upload_path = warp::path!("upload")
         .and(warp::post())
@@ -36,7 +34,10 @@ pub async fn start() {
         env::var("UPLOAD_DIR").expect("UPLOAD_DIR undefined"),
     ));
 
-    let router = upload_path.or(download_route).or(root_path).recover(handle_rejection);
+    let router = upload_path
+        .or(download_route)
+        .or(root_path)
+        .recover(handle_rejection);
 
     let port: u16 = env::var("PORT")
         .expect("Server port undefined")
@@ -65,8 +66,7 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
     let mut parts = form.into_stream();
     while let Some(Ok(part)) = parts.next().await {
         let filename = part.filename().unwrap_or("unnamed.txt").to_owned();
-        println!("{}", filename);
-        let extension = Path::new(&filename).extension().unwrap();
+        let extension = Path::new(&filename).extension().unwrap_or(&OsStr::new(""));
 
         let stream_data = part
             .stream()
@@ -100,7 +100,12 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
             msg: "Couldn't create upload path".to_owned(),
         })?;
 
-        let new_filename = format!("{}.{}", nanoid!(), extension.to_str().unwrap());
+        let new_filename = format!(
+            "{}{}{}",
+            nanoid!(),
+            if !extension.is_empty() { "." } else { "" },
+            extension.to_str().unwrap()
+        );
         let upload_path = current_upload_dir.join(new_filename.clone());
 
         fs::write(&upload_path, &stream_data).map_err(|_| SystemError {
@@ -131,6 +136,8 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
         ("SYS_ERROR", StatusCode::INTERNAL_SERVER_ERROR)
     } else if err.find::<Unauthorized>().is_some() {
         ("Unauthorized", StatusCode::UNAUTHORIZED)
+    } else if err.find::<MethodNotAllowed>().is_some() {
+        ("Invalid Request Method", StatusCode::METHOD_NOT_ALLOWED)
     } else {
         println!("{:#?}", err);
         ("INTERNAL_SERVER_ERROR", StatusCode::INTERNAL_SERVER_ERROR)
