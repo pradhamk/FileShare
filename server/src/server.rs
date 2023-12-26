@@ -65,6 +65,7 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
     let mut parts = form.into_stream();
     while let Some(Ok(part)) = parts.next().await {
         let filename = part.filename().unwrap_or("unnamed.txt").to_owned();
+        println!("{}", filename);
         let extension = Path::new(&filename).extension().unwrap();
 
         let stream_data = part
@@ -131,6 +132,7 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
     } else if err.find::<Unauthorized>().is_some() {
         ("Unauthorized", StatusCode::UNAUTHORIZED)
     } else {
+        println!("{:#?}", err);
         ("INTERNAL_SERVER_ERROR", StatusCode::INTERNAL_SERVER_ERROR)
     };
 
