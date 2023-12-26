@@ -22,6 +22,10 @@ impl reject::Reject for SystemError {}
 impl reject::Reject for Unauthorized {}
 
 pub async fn start() {
+    let root_path = warp::path::end().map(|| {
+        "File Hosting Server"
+    });
+
     let upload_path = warp::path!("upload")
         .and(warp::post())
         .and(header("ACCESS-KEY"))
@@ -32,7 +36,7 @@ pub async fn start() {
         env::var("UPLOAD_DIR").expect("UPLOAD_DIR undefined"),
     ));
 
-    let router = upload_path.or(download_route).recover(handle_rejection);
+    let router = upload_path.or(download_route).or(root_path).recover(handle_rejection);
 
     let port: u16 = env::var("PORT")
         .expect("Server port undefined")
@@ -113,7 +117,6 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
 }
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
-    println!("{:#?}", err);
     let (message, code) = if err.is_not_found() {
         ("NOT FOUND", StatusCode::NOT_FOUND)
     } else if err.find::<MissingHeader>().is_some()
