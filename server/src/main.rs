@@ -1,3 +1,4 @@
+mod log;
 mod server;
 
 use dotenv::dotenv;

@@ -1,4 +1,5 @@
-use chrono;
+use crate::log::log;
+use chrono::Utc;
 use futures::{StreamExt, TryStreamExt};
 use nanoid::nanoid;
 use std::{env, fs, path::Path};
@@ -6,10 +7,7 @@ use warp::{
     filters::{header::header, multipart::FormData},
     http::StatusCode,
     reject::{self, MissingHeader, Rejection},
-    reply, 
-    Buf, 
-    Filter, 
-    Reply,
+    reply, Buf, Filter, Reply,
 };
 
 #[derive(Debug)]
@@ -27,28 +25,26 @@ pub async fn start() {
     let upload_path = warp::path!("upload")
         .and(warp::post())
         .and(header("ACCESS-KEY"))
-        .and(
-            warp::multipart::form().max_length(5_000_000_000), // 5 GB upload max
-        )
+        .and(warp::multipart::form().max_length(5_000_000_000))
         .and_then(upload);
 
     let router = upload_path.recover(handle_rejection);
 
-    let port = env::var("PORT")
+    let port: u16 = env::var("PORT")
         .expect("Server port undefined")
         .parse()
-        .unwrap();
+        .expect("Invalid port number");
 
-    println!("Starting server on port {}", port);
+    log("info", &format!("Starting server on port {}", port)).expect("Failed to log startup info");
 
     warp::serve(router).run(([127, 0, 0, 1], port)).await;
 }
 
 async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
-    let access_key = env::var("ACCESS_KEY").or_else(|_| {
-        Err(reject::custom(SystemError {
+    let access_key = env::var("ACCESS_KEY").map_err(|_| {
+        reject::custom(SystemError {
             msg: "ACCESS_KEY undefined".to_owned(),
-        }))
+        })
     })?;
 
     if key != access_key {
@@ -75,18 +71,15 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
                 })
             })?; // Fold stream data into one vector
 
-        let upload_var = env::var("UPLOAD_DIR").or_else(|_| {
-            Err(reject::custom(SystemError {
+        let upload_dir = env::var("UPLOAD_DIR").map_err(|_| {
+            reject::custom(SystemError {
                 msg: "UPLOAD_DIR undefined".to_owned(),
-            }))
+            })
         })?;
-        let upload_dir = Path::new(&upload_var);
+        let upload_dir = Path::new(&upload_dir);
 
         if !upload_dir.exists() {
-            println!(
-                "Creating upload directory at {}",
-                upload_dir.to_str().unwrap()
-            );
+            println!("Creating upload directory at {}", upload_dir.display());
             fs::create_dir(upload_dir).map_err(|_| {
                 reject::custom(SystemError {
                     msg: "Couldn't create upload directory".to_owned(),
@@ -94,8 +87,8 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
             })?;
         }
 
-        let date = &chrono::Utc::now().format("%Y/%m/%d").to_string();
-        let date_path = Path::new(date);
+        let date = Utc::now().format("%Y/%m/%d").to_string();
+        let date_path = Path::new(&date);
         let current_upload_dir = upload_dir.join(date_path.clone());
         fs::create_dir_all(&current_upload_dir).map_err(|_| {
             reject::custom(SystemError {
@@ -112,7 +105,7 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
             })
         })?;
 
-        uploaded_files.push(format!("{}/{}", date_path.to_str().unwrap(), filename));
+        uploaded_files.push(format!("{}/{}", date_path.display(), filename));
     }
 
     Ok(uploaded_files.join(" "))
@@ -127,6 +120,9 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::In
     {
         ("BAD_REQUEST", StatusCode::BAD_REQUEST)
     } else if let Some(e) = err.find::<SystemError>() {
+        log("warn", &e.msg).unwrap_or_else(|_| {
+            println!("Unable to log error data to log file");
+        });
         ("SYS_ERROR", StatusCode::INTERNAL_SERVER_ERROR)
     } else if err.find::<Unauthorized>().is_some() {
         ("Unauthorized", StatusCode::UNAUTHORIZED)
