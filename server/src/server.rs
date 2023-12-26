@@ -3,10 +3,13 @@ use futures::{StreamExt, TryStreamExt};
 use nanoid::nanoid;
 use std::{env, fs, path::Path};
 use warp::{
-    filters::multipart::FormData,
+    filters::{header::header, multipart::FormData},
     http::StatusCode,
-    reject::{self, InvalidHeader, Rejection},
-    reply, Buf, Filter, Reply,
+    reject::{self, MissingHeader, Rejection},
+    reply, 
+    Buf, 
+    Filter, 
+    Reply,
 };
 
 #[derive(Debug)]
@@ -14,11 +17,16 @@ struct SystemError {
     msg: String,
 }
 
+#[derive(Debug)]
+struct Unauthorized;
+
 impl reject::Reject for SystemError {}
+impl reject::Reject for Unauthorized {}
 
 pub async fn start() {
     let upload_path = warp::path!("upload")
         .and(warp::post())
+        .and(header("ACCESS-KEY"))
         .and(
             warp::multipart::form().max_length(5_000_000_000), // 5 GB upload max
         )
@@ -33,12 +41,20 @@ pub async fn start() {
 
     println!("Starting server on port {}", port);
 
-    warp::serve(router)
-        .run(([127, 0, 0, 1], port))
-        .await;
+    warp::serve(router).run(([127, 0, 0, 1], port)).await;
 }
 
-async fn upload(form: FormData) -> Result<impl Reply, Rejection> {
+async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
+    let access_key = env::var("ACCESS_KEY").or_else(|_| {
+        Err(reject::custom(SystemError {
+            msg: "ACCESS_KEY undefined".to_owned(),
+        }))
+    })?;
+
+    if key != access_key {
+        return Err(reject::custom(Unauthorized));
+    }
+
     let mut parts = form.into_stream();
     let mut uploaded_files = Vec::new();
 
@@ -95,7 +111,7 @@ async fn upload(form: FormData) -> Result<impl Reply, Rejection> {
                 msg: "Couldn't write to file".to_owned(),
             })
         })?;
-        
+
         uploaded_files.push(format!("{}/{}", date_path.to_str().unwrap(), filename));
     }
 
@@ -103,14 +119,17 @@ async fn upload(form: FormData) -> Result<impl Reply, Rejection> {
 }
 
 async fn handle_rejection(err: Rejection) -> Result<impl Reply, std::convert::Infallible> {
+    println!("{:#?}", err);
     let (message, code) = if err.is_not_found() {
         ("NOT FOUND", StatusCode::NOT_FOUND)
-    } else if err.find::<InvalidHeader>().is_some()
+    } else if err.find::<MissingHeader>().is_some()
         || err.find::<reject::PayloadTooLarge>().is_some()
     {
         ("BAD_REQUEST", StatusCode::BAD_REQUEST)
     } else if let Some(e) = err.find::<SystemError>() {
         ("SYS_ERROR", StatusCode::INTERNAL_SERVER_ERROR)
+    } else if err.find::<Unauthorized>().is_some() {
+        ("Unauthorized", StatusCode::UNAUTHORIZED)
     } else {
         ("INTERNAL_SERVER_ERROR", StatusCode::INTERNAL_SERVER_ERROR)
     };
