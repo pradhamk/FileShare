@@ -25,10 +25,14 @@ pub async fn start() {
     let upload_path = warp::path!("upload")
         .and(warp::post())
         .and(header("ACCESS-KEY"))
-        .and(warp::multipart::form().max_length(5_000_000_000))
+        .and(warp::multipart::form().max_length(5_000_000_000)) // 5 GB Max Upload
         .and_then(upload);
 
-    let router = upload_path.recover(handle_rejection);
+    let download_route = warp::path("files").and(warp::fs::dir(
+        env::var("UPLOAD_DIR").expect("UPLOAD_DIR undefined"),
+    ));
+
+    let router = upload_path.or(download_route).recover(handle_rejection);
 
     let port: u16 = env::var("PORT")
         .expect("Server port undefined")
@@ -51,9 +55,10 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
         return Err(reject::custom(Unauthorized));
     }
 
-    let mut parts = form.into_stream();
     let mut uploaded_files = Vec::new();
+    let mut file_count = 0;
 
+    let mut parts = form.into_stream();
     while let Some(Ok(part)) = parts.next().await {
         let filename = part.filename().unwrap_or("unnamed.txt").to_owned();
         let extension = Path::new(&filename).extension().unwrap();
@@ -69,45 +74,41 @@ async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
                 reject::custom(SystemError {
                     msg: "Couldn't fold form data".to_owned(),
                 })
-            })?; // Fold stream data into one vector
+            })?; // Fold stream into one vector
 
-        let upload_dir = env::var("UPLOAD_DIR").map_err(|_| {
-            reject::custom(SystemError {
-                msg: "UPLOAD_DIR undefined".to_owned(),
-            })
+        let upload_var = &env::var("UPLOAD_DIR").map_err(|_| SystemError {
+            msg: "UPLOAD_DIR undefined".to_owned(),
         })?;
-        let upload_dir = Path::new(&upload_dir);
+        let upload_dir = Path::new(upload_var);
 
         if !upload_dir.exists() {
             println!("Creating upload directory at {}", upload_dir.display());
-            fs::create_dir(upload_dir).map_err(|_| {
-                reject::custom(SystemError {
-                    msg: "Couldn't create upload directory".to_owned(),
-                })
+            fs::create_dir(upload_dir).map_err(|_| SystemError {
+                msg: "Couldn't create upload directory".to_owned(),
             })?;
         }
 
         let date = Utc::now().format("%Y/%m/%d").to_string();
         let date_path = Path::new(&date);
         let current_upload_dir = upload_dir.join(date_path.clone());
-        fs::create_dir_all(&current_upload_dir).map_err(|_| {
-            reject::custom(SystemError {
-                msg: "Couldn't create upload path".to_owned(),
-            })
+        fs::create_dir_all(&current_upload_dir).map_err(|_| SystemError {
+            msg: "Couldn't create upload path".to_owned(),
         })?;
 
         let new_filename = format!("{}.{}", nanoid!(), extension.to_str().unwrap());
-        let upload_path = current_upload_dir.join(new_filename);
+        let upload_path = current_upload_dir.join(new_filename.clone());
 
-        fs::write(&upload_path, &stream_data).map_err(|_| {
-            reject::custom(SystemError {
-                msg: "Couldn't write to file".to_owned(),
-            })
+        fs::write(&upload_path, &stream_data).map_err(|_| SystemError {
+            msg: "Couldn't write to file".to_owned(),
         })?;
 
-        uploaded_files.push(format!("{}/{}", date_path.display(), filename));
+        uploaded_files.push(format!("{}/{}", date_path.display(), new_filename));
+        file_count += 1;
     }
 
+    log("info", &format!("Uploaded {} file[s]", file_count)).unwrap_or_else(|_| {
+        println!("Unable to log error data to log file");
+    });
     Ok(uploaded_files.join(" "))
 }
 
