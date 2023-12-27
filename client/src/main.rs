@@ -27,8 +27,8 @@ struct Args {
     #[arg(short, long, help = "Upload all files in directory")]
     directory: Option<String>,
 
-    #[arg(short, long, default_value = "records.json")]
-    records_path: String,
+    #[arg(short, long)]
+    records_path: Option<String>,
 
     #[arg(short, long, help = "Suppress output", default_value_t = false)]
     quiet: bool,
@@ -36,7 +36,7 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
+    dotenv::from_path(env::var("ENV_FILE").unwrap_or(".env".to_owned())).ok();
 
     let args = Args::parse();
 
@@ -75,7 +75,13 @@ async fn main() {
             .unwrap();
     }
 
-    match upload_files(file_paths, &args.records_path).await {
+    let rpath = if let Some(path) = args.records_path {
+        Path::new(&path).join("records.json")
+    } else {
+        Path::new(&env::var("CLIENT_DIR").unwrap_or("./".to_string())).join("records.json")
+    };
+
+    match upload_files(file_paths, rpath.to_str().unwrap()).await {
         Ok(urls) => {
             ctx.set_contents("".to_owned())
                 .expect("Failed to clear clipboard");
@@ -193,6 +199,7 @@ async fn upload_files(
         .map(|(file_url, fname)| async move {
             let base_url = env::var("BASE_URL").expect("Base Url undefined");
             let final_url = Path::new(&base_url).join("files").join(file_url);
+
             create_record(
                 records_path,
                 Record {
