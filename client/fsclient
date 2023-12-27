@@ -1,0 +1,7 @@
+#!/bin/bash
+
+export CLIENT_DIR="[PATH TO CLIENT DIR]"
+
+export ENV_FILE="$CLIENT_DIR/.env"
+
+exec $CLIENT_DIR/target/release/client $@
