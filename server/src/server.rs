@@ -46,7 +46,7 @@ pub async fn start() {
 
     log("info", &format!("Starting server on port {}", port)).expect("Failed to log startup info");
 
-    warp::serve(router).run(([127, 0, 0, 1], port)).await;
+    warp::serve(router).run(([0, 0, 0, 0], port)).await;
 }
 
 async fn upload(key: String, form: FormData) -> Result<impl Reply, Rejection> {
