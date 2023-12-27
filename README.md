@@ -19,8 +19,17 @@ Run the command: ```cargo run --release``` to initiate the server
 | Access_key | Auth key used when uploading files (you have to create one) |
 
 #### Using Docker
-- [ ] Create a Docker file
+In order to use the containerized version of the server, you can use [`docker-compose.yml`](/server/docker-compose.yml) (Changing the .env file will not do anything)
 
+1. Edit the `docker-compose.yml` file to set:
+
+ - **HOST_PORT:** The port on the host which will expose the server
+- **ACCESS_KEY:** Auth key used when uploading files
+- **HOST_DIRECTORY:** Directory on host that will be bound to the container's upload directory (will let you view uploads)
+
+2. Run `docker-compose up -d` and wait for the service to start
+
+> NOTE: Do **NOT** change anything not in [] unless you alter the `Dockerfile` as well
 ---
 ## Client
 The client is standard CLI tool that you can use to upload files with. For more help, you can run:

@@ -1,0 +1,12 @@
+version: '3.3'
+services:
+  fileshare:
+    container_name: "fileshare"
+    restart: unless-stopped
+    build: .
+    ports:
+      - "[HOST_PORT]:8080"
+    environment:
+      - ACCESS_KEY=[ACCESS_KEY]
+    volumes:
+      - "[HOST_DIRECTORY]:/app/uploads"
